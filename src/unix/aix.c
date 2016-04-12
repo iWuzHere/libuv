@@ -454,7 +454,7 @@ static char *uv__rawname(char *cp) {
 
 /* 
  * Determine whether given pathname is a directory
- * Returns 0 if the path is a directory, -1 if not
+ * Returns 1 if the path is a directory, 0 if not
  *
  * Note: Opportunity here for more detailed error information but
  *       that requires changing callers of this function as well
@@ -463,12 +463,12 @@ static int uv__path_is_a_directory(char* filename) {
   struct stat statbuf;
 
   if (stat(filename, &statbuf) < 0)
-    return -1;  /* failed: not a directory, assume it is a file */
+    return 0;  /* failed: not a directory, assume it is a file */
 
   if (statbuf.st_type == VDIR)
-    return 0;
+    return 1;
 
-  return -1;
+  return 0;
 }
 
 
@@ -552,7 +552,7 @@ static int uv__makedir_p(const char *dir) {
  * file system for monitoring the object specified.
  * Returns code from mkdir call
  */
-static int uv__make_subdirs_p(const char *filename) {
+static int uv__make_subdirs_p(const char *filename, const int is_dir) {
   char cmd[2048];
   char *p;
   int rc = 0;
@@ -563,7 +563,7 @@ static int uv__make_subdirs_p(const char *filename) {
   if (p == NULL)
     return 0;
 
-  if (uv__path_is_a_directory((char*)filename) == 0) {
+  if (is_dir) {
     sprintf(cmd, "/aha/fs/modDir.monFactory");
   } else {
     sprintf(cmd, "/aha/fs/modFile.monFactory");
@@ -585,16 +585,12 @@ static int uv__make_subdirs_p(const char *filename) {
  * objects for the specified file.
  * Returns 0 on success, or an error code < 0 on failure
  */
-static int uv__setup_ahafs(const char* filename, int *fd) {
+static int uv__setup_ahafs(const char* filename, int *fd, const int is_dir) {
   int rc = 0;
   char mon_file_write_string[RDWR_BUF_SIZE];
   char mon_file[PATH_MAX];
-  int file_is_directory = 0; /* -1 == NO, 0 == YES  */
 
-  /* Create monitor file name for object */
-  file_is_directory = uv__path_is_a_directory((char*)filename);
-
-  if (file_is_directory == 0)
+  if (is_dir)
     sprintf(mon_file, "/aha/fs/modDir.monFactory");
   else
     sprintf(mon_file, "/aha/fs/modFile.monFactory");
@@ -603,7 +599,7 @@ static int uv__setup_ahafs(const char* filename, int *fd) {
     return -ENAMETOOLONG;
 
   /* Make the necessary subdirectories for the monitor file */
-  rc = uv__make_subdirs_p(filename);
+  rc = uv__make_subdirs_p(filename, is_dir);
   if (rc == -1 && errno != EEXIST)
     return rc;
 
@@ -629,7 +625,7 @@ static int uv__setup_ahafs(const char* filename, int *fd) {
    *      INFO_LVL=2
    */
 
-  if (file_is_directory == 0)
+  if (is_dir)
     sprintf(mon_file_write_string, "CHANGED=YES;WAIT_TYPE=WAIT_IN_SELECT;INFO_LVL=2");
   else
     sprintf(mon_file_write_string, "CHANGED=YES;WAIT_TYPE=WAIT_IN_SELECT;INFO_LVL=1");
@@ -701,7 +697,7 @@ static int uv__parse_data(char *buf, int *events, uv_fs_event_t* handle) {
     return -1;
 
   if (sscanf(p, "RC_FROM_EVPROD=%d\nEND_EVENT_DATA", &evp_rc) == 1) {
-    if (uv__path_is_a_directory(handle->path) == 0) { /* Directory */
+    if (uv__path_is_a_directory(handle->path)) { /* Directory */
       if (evp_rc == AHAFS_MODDIR_UNMOUNT || evp_rc == AHAFS_MODDIR_REMOVE_SELF) {
         /* The directory is no longer available for monitoring */
         *events = UV_RENAME;
@@ -764,7 +760,7 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
   /* For directory changes, the name of the files that triggered the change
    * are never absolute pathnames
    */
-  if (uv__path_is_a_directory(handle->path) == 0) {
+  if (uv__path_is_a_directory(handle->path)) {
     p = handle->dir_filename;
   } else {
     p = strrchr(handle->path, '/');
@@ -798,6 +794,7 @@ int uv_fs_event_start(uv_fs_event_t* handle,
                       unsigned int flags) {
 #ifdef HAVE_SYS_AHAFS_EVPRODS_H
   int  fd, rc, str_offset = 0;
+  int file_is_directory;
   char cwd[PATH_MAX];
   char absolute_path[PATH_MAX];
   char readlink_cwd[PATH_MAX];
@@ -826,8 +823,10 @@ int uv_fs_event_start(uv_fs_event_t* handle,
   if (uv__is_ahafs_mounted() < 0)  /* /aha checks failed */
     return UV_ENOSYS;
 
+  file_is_directory = uv__path_is_a_directory((char*)filename);
+
   /* Setup ahafs */
-  rc = uv__setup_ahafs((const char *)absolute_path, &fd);
+  rc = uv__setup_ahafs((const char *)absolute_path, &fd, file_is_directory);
   if (rc != 0)
     return rc;
 
@@ -854,7 +853,7 @@ int uv_fs_event_stop(uv_fs_event_t* handle) {
   uv__io_close(handle->loop, &handle->event_watcher);
   uv__handle_stop(handle);
 
-  if (uv__path_is_a_directory(handle->path) == 0) {
+  if (uv__path_is_a_directory(handle->path)) {
     uv__free(handle->dir_filename);
     handle->dir_filename = NULL;
   }
