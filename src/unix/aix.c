@@ -53,6 +53,7 @@
 #include <ctype.h>
 #ifdef HAVE_SYS_AHAFS_EVPRODS_H
 #include <sys/ahafs_evProds.h>
+#include <dirent.h>
 #endif
 
 #include <sys/mntctl.h>
@@ -775,6 +776,25 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
 
   handle->cb(handle, fname, events, 0);
 }
+
+/* Creates a watchfile on ahafs for each file under the directory we want
+ * monitor.
+ * returns 0 on success, -1 on failure with errno set accordingly
+ */
+static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
+  DIR *directory = NULL;
+  struct dirent *dir;
+  int rc = 0;
+
+  directory = opendir(dir_path);
+  if (directory == NULL)
+    return -1;
+
+  do {
+
+  } while (dir != NULL);
+  return rc;
+}
 #endif
 
 
@@ -835,6 +855,12 @@ int uv_fs_event_start(uv_fs_event_t* handle,
   uv__io_init(&handle->event_watcher, uv__ahafs_event, fd);
   handle->path = uv__strdup(filename);
   handle->cb = cb;
+
+  if (file_is_directory) {
+    rc = uv__create_watch_files(handle, (const char*)absolute_path);
+    if (rc != 0)
+      return rc;
+  }
 
   uv__io_start(handle->loop, &handle->event_watcher, POLLIN);
 
