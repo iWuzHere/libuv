@@ -785,14 +785,26 @@ static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
   DIR *directory = NULL;
   struct dirent *dir;
   int rc = 0;
+  int saved_errno;
+  us_fs_event_t* file_handle;
+  char filepath[PATH_MAX];
 
   directory = opendir(dir_path);
   if (directory == NULL)
     return -1;
 
-  do {
+  saved_errno = errno;
 
-  } while (dir != NULL);
+  while (dir = readdir(directory) != NULL) {
+    dir->d_name;
+    
+  }
+
+  closedir(directory);
+  /* If dir is null and errno is different we have an error */
+  if (errno != saved_errno)
+    return -1;
+
   return rc;
 }
 #endif
