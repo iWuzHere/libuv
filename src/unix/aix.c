@@ -777,6 +777,11 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
   handle->cb(handle, fname, events, 0);
 }
 
+struct ahafs_file_handle_s {
+  uv_fs_event_t* file_handle;
+  uv_fs_event_t* dir_handle;
+  QUEUE node;
+} ahafs_file_handle_t;
 /* Creates a watchfile on ahafs for each file under the directory we want
  * monitor.
  * returns 0 on success, -1 on failure with errno set accordingly
@@ -784,25 +789,64 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
 static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
   DIR *directory = NULL;
   struct dirent *dir;
+  struct dirent entry;
   int rc = 0;
-  int saved_errno;
+  int fd, saved_errno;
   us_fs_event_t* file_handle;
   char filepath[PATH_MAX];
+  uv_fs_event_t* file_handle
+  ahafs_file_handle_t* ahafs_fh;
+  QUEUE *queue;
 
   directory = opendir(dir_path);
   if (directory == NULL)
     return -1;
 
+  queue = uv__malloc(sizeof(QUEUE));
+
+  if (queue == NULL)
+    return -1;
+
+  handle->data = (void *)queue;
+  QUEUE_INIT(queue);
+
   saved_errno = errno;
 
-  while (dir = readdir(directory) != NULL) {
-    dir->d_name;
-    
+  while (readdir_r(directory, &entry, &dir) == 0) {
+    if (strcmp(dir->d_name, ".") == 0 && strcmp(dir->d_name. "..") == 0)
+      continue;
+    /* We do not recursively watch directories */
+    if (uv__path_is_a_directory(dir->d_name))
+      continue;
+    snprintf(filepath, sizeof(filepath), "%s/%s", dir_path, dir->d_name);
+    rc = uv__setup_ahafs(filepath, &fd, 0);
+    if (rc < 0)
+      return -1;
+
+    ahafs_fh = uv__malloc(sizeof(ahafs_file_handle_t));
+    if (ahafs_fh == NULL)
+      return -1;
+    file_handle = uv__malloc(sizeof(uv_fs_event_t));
+    if (file_handle == NULL)
+      return -1;
+
+    QUEUE_INIT(&(ahafs_fh->node));
+    ahafs_fh->dir_handle = handle;
+    ahafs_fh->file_handle = file_handle;
+    QUEUE_INSERT_TAIL(queue, ahafs_fh->node);
+
+    uv_fs_event_init(handle->loop, file_handle);
+    uv__handle_start(file_handle);
+    uv__io_init(&file_handle->event_watcher, uv__ahafs_event, fd);
+    file_handle->path = uv__strdup(dir->d_name);
+    file_handle->cb = handle->cb;
+    file_handle->data = (void *)queue;
+    uv__io_start(handle->loop, &handle->event_watcher, POLLIN);
   }
 
   closedir(directory);
   /* If dir is null and errno is different we have an error */
-  if (errno != saved_errno)
+  if (dir == NULL && errno != saved_errno)
     return -1;
 
   return rc;
