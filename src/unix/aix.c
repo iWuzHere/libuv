@@ -851,6 +851,14 @@ static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
 
   return rc;
 }
+
+static void uv__fs_event_stop_afafs_dir(QUEUE *q) {
+  if (q == NULL)
+    return;
+  while(!QUEUE_EMPTY(q)) {
+    
+  }
+}
 #endif
 
 
@@ -938,6 +946,7 @@ int uv_fs_event_stop(uv_fs_event_t* handle) {
   if (uv__path_is_a_directory(handle->path)) {
     uv__free(handle->dir_filename);
     handle->dir_filename = NULL;
+    uv__fs_event_stop_afafs_dir((QUEUE *)handle->data);
   }
 
   uv__free(handle->path);
