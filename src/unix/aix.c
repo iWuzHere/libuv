@@ -853,11 +853,16 @@ static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
 }
 
 static void uv__fs_event_stop_afafs_dir(QUEUE *q) {
+  QUEUE *queue;
+  ahafs_file_handle_t* ahafs_fh
   if (q == NULL)
     return;
   while(!QUEUE_EMPTY(q)) {
-    
+    queue = QUEUE_HEAD(q);
+    QUEUE_REMOVE(queue);
+    ahafs_fh = container_of(queue, ahafs_file_handle_t, node);
   }
+  uv__free(q);
 }
 #endif
 
@@ -947,6 +952,7 @@ int uv_fs_event_stop(uv_fs_event_t* handle) {
     uv__free(handle->dir_filename);
     handle->dir_filename = NULL;
     uv__fs_event_stop_afafs_dir((QUEUE *)handle->data);
+    handle->data = NULL;
   }
 
   uv__free(handle->path);
