@@ -667,7 +667,7 @@ static int uv__skip_lines(char **p, int n) {
  * Returns 0 on success, -1 if unrecoverable error in parsing
  *
  */
-static int uv__parse_data(char *buf, int *events, uv_fs_event_t* handle) {
+static int uv__parse_data(char *buf, int *events, uv_fs_event_t* handle, int under_watched_dir) {
   int    evp_rc, i;
   char   *p;
   char   filename[PATH_MAX]; /* To be used when handling directories */
@@ -717,7 +717,13 @@ static int uv__parse_data(char *buf, int *events, uv_fs_event_t* handle) {
         } else
           return -1;
         }
-    } else { /* Regular File */
+    } else if (under_watched_dir) {
+      /* File under a directory that we are watching */
+
+      /* Handle file being created */
+      /* Handle file being removed */
+    } else {
+     /* Regular File */
       if (evp_rc == AHAFS_MODFILE_RENAME)
         *events = UV_RENAME;
       else
@@ -733,6 +739,13 @@ static int uv__parse_data(char *buf, int *events, uv_fs_event_t* handle) {
 
 /* This is the internal callback */
 static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int fflags) {
+  uv__ahafs_event_main(loop, event_watch, 0);
+}
+static void uv__ahafs_dir_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int fflags) {
+  uv__ahafs_event_main(loop, event_watch, 1);
+}
+
+static void uv__ahafs_event_main(uv_loop_t* loop, uv__io_t* event_watch, int under_watched_dir) {
   char   result_data[RDWR_BUF_SIZE];
   int bytes, rc = 0;
   uv_fs_event_t* handle;
@@ -752,7 +765,7 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
 
   /* Parse the data */
   if(bytes > 0)
-    rc = uv__parse_data(result_data, &events, handle);
+    rc = uv__parse_data(result_data, &events, handle, under_watched_dir);
 
   /* Unrecoverable error */
   if (rc == -1)
@@ -813,9 +826,7 @@ static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
   saved_errno = errno;
 
   while (readdir_r(directory, &entry, &dir) == 0) {
-    if (strcmp(dir->d_name, ".") == 0 && strcmp(dir->d_name. "..") == 0)
-      continue;
-    /* We do not recursively watch directories */
+    /* We do not recursively watch directories. */
     if (uv__path_is_a_directory(dir->d_name))
       continue;
     snprintf(filepath, sizeof(filepath), "%s/%s", dir_path, dir->d_name);
@@ -837,10 +848,10 @@ static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
 
     uv_fs_event_init(handle->loop, file_handle);
     uv__handle_start(file_handle);
-    uv__io_init(&file_handle->event_watcher, uv__ahafs_event, fd);
+    uv__io_init(&file_handle->event_watcher, uv__ahafs_dir_event, fd);
     file_handle->path = uv__strdup(dir->d_name);
     file_handle->cb = handle->cb;
-    file_handle->data = (void *)queue;
+    file_handle->data = (void *)ahafs_fh;
     uv__io_start(handle->loop, &handle->event_watcher, POLLIN);
   }
 
@@ -852,6 +863,13 @@ static int uv__create_watch_files(uv_fs_event_t* handle, const char* dir_path) {
   return rc;
 }
 
+static void uv__free_ahafs_fh(ahafs_file_handle_t* ahafs_fh) {
+  uv_fs_event_stop(ahafs_fh->file_handle);
+  uv__free(ahafs_fh->file_handle);
+  ahafs_fh->file_handle = NULL;
+  uv__free(ahafs_fh);
+}
+
 static void uv__fs_event_stop_afafs_dir(QUEUE *q) {
   QUEUE *queue;
   ahafs_file_handle_t* ahafs_fh
@@ -861,6 +879,7 @@ static void uv__fs_event_stop_afafs_dir(QUEUE *q) {
     queue = QUEUE_HEAD(q);
     QUEUE_REMOVE(queue);
     ahafs_fh = container_of(queue, ahafs_file_handle_t, node);
+    uv__free_ahafs_fh(ahafs_fh);
   }
   uv__free(q);
 }
